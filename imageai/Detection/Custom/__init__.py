@@ -56,13 +56,14 @@ class DetectionModelTrainer:
         self.__output_models_dir: str = None
         self.__output_json_dir: str = None
 
-    def __set_training_param(self, epochs : int, accumulate : int) -> None:
+    def __set_training_param(self, epochs : int, accumulate : int, anchors = None) -> None:
         # self.__lr_lambda = lambda x : ((1 - math.cos(x * math.pi / epochs)) / 2  ) * (0.1 - 1.0) + 1.0
         self.__lr_lambda = lambda x: (1 - x / (epochs - 1)) * (1.0 - 0.01) + 0.01
         self.__anchors = generate_anchors(
                                 self.__custom_train_dataset,
                                 n=9 if self.__model_type=="yolov3" else 6
-                            )
+                            ) if anchors is None else anchors
+
         self.__anchors = [round(i) for i in self.__anchors.reshape(-1).tolist()]
         if self.__model_type == "yolov3":
             self.__model = YoloV3(
@@ -211,7 +212,9 @@ class DetectionModelTrainer:
         self.__output_models_dir = os.path.join(self.__data_dir if output_path is None else output_path, "models")
         self.__output_json_dir = os.path.join(self.__data_dir if output_path is None else output_path, "json")
 
-    def trainModel(self, eval_every_epoch=1) -> None:
+    def trainModel(
+        self, eval_every_epoch=1, continue_training=True, save_every_epoch=5
+    ) -> None:
         """
         'trainModel()' function starts the actual model training. Once the training starts, the training instance
         creates 3 sub-folders in your dataset folder which are:
@@ -225,31 +228,52 @@ class DetectionModelTrainer:
         os.makedirs(self.__output_models_dir, exist_ok=True)
         os.makedirs(self.__output_json_dir, exist_ok=True)
 
-        mp, mr, map50, map50_95, best_fitness = 0, 0, 0, 0, 0.0
+        progress_running_path = os.path.join(self.__output_json_dir, "progress_running.json")
+        if os.path.exists(progress_running_path):
+            with open(progress_running_path, 'r') as f:
+                progress_data = json.load(f)
+        else progress_data = None
+
+        if not continue_training:
+            progress_data = None
+
+        anchors = None if progress_data is None else progress_data['anchors']
+        last_save_model = None if progress_data is None else progress_data['last_checkpoint_save_name']
+
+        mp, mr, map50, map50_95, best_fitness = 0, 0, 0, 0, 0.0 if progress_data is None else progress_data['best_map']
         nbs = 64 # norminal batch size
         nb = len(self.__train_loader) # number of batches
         nw = max(3 * nb, 1000)  # number of warmup iterations.
         last_opt_step = -1
-        prev_save_name, recent_save_name = "", ""
 
+        prev_save_name = "" if progress_data is None else progress_data['best_save_name']
+        recent_save_name = ""
+        last_checkpoint_save_name = "" if progress_data is None else progress_data['last_checkpoint_save_name']
+    
         accumulate = max(round(nbs / self.__mini_batch_size), 1) # accumulate loss before optimizing.
 
-        self.__set_training_param(self.__epochs, accumulate)
+        if last_save_model:
+            self.__model_path = os.path.join(self.__output_models_dir, last_save_model)
 
-        with open(os.path.join(self.__output_json_dir, f"{self.__dataset_name}_{self.__model_type}_detection_config.json"), "w") as configWriter:
-            json.dump(
-                {
-                    "labels": self.__classes,
-                    "anchors": self.__anchors
-                },
-                configWriter
-            )
+        self.__set_training_param(self.__epochs, accumulate, anchors)
+
+        if not progress_data:
+            with open(os.path.join(self.__output_json_dir, f"{self.__dataset_name}_{self.__model_type}_detection_config.json"), "w") as configWriter:
+                json.dump(
+                    {
+                        "labels": self.__classes,
+                        "anchors": self.__anchors
+                    },
+                    configWriter
+                )
 
         since = time.time()
 
         self.__lr_scheduler.last_epoch = -1
 
-        for epoch in range(1, self.__epochs+1):
+        last_train_epochs = 1 if progress_data is None else progress_data['last_train_epochs']
+
+        for epoch in range(last_train_epochs, self.__epochs+1):
             self.__optimizer.zero_grad()
             mloss = torch.zeros(3, device=self.__device)
             print(f"Epoch {epoch}/{self.__epochs}", "-"*10, sep="\n")
@@ -291,6 +315,33 @@ class DetectionModelTrainer:
 
                     print(f"    box loss-> {float(mloss[0]):.5f}, object loss-> {float(mloss[1]):.5f}, class loss-> {float(mloss[2]):.5f}")
 
+                    if (i % save_every_epoch) == 0:
+                        recent_save_name = self.__model_type+f"_{self.__dataset_name}_checkpoint_epoch-{epoch}.pt"
+                        if last_checkpoint_save_name:
+                            os.remove(os.path.join(self.__output_models_dir, last_checkpoint_save_name))
+
+                        torch.save(
+                            self.__model.state_dict(),
+                            os.path.join(self.__output_models_dir, last_checkpoint_save_name)
+                        )
+                        last_checkpoint_save_name = recent_save_name
+
+                        if progress_data is None:
+                            progress_data = {
+                                "anchors" : anchors,
+                                "last_checkpoint_save_name": last_checkpoint_save_name,
+                                "best_save_name": None,
+                                "last_train_epochs": epoch,
+                                "best_map": best_fitness
+                            }
+                        else :
+                            progress_data['last_checkpoint_save_name'] = last_checkpoint_save_name
+                            progress_data["last_train_epochs"] = epoch
+                        
+                        with open(progress_running_path, "w") as configWriter:
+                            json.dump(progress_data, configWriter)
+
+
                     self.__lr_scheduler.step()
 
                 else:
@@ -319,11 +370,43 @@ class DetectionModelTrainer:
                         )
                         prev_save_name = recent_save_name
 
+                        if progress_data is None:
+                            progress_data = {
+                                "anchors" : anchors,
+                                "last_checkpoint_save_name": None,
+                                "best_save_name": prev_save_name,
+                                "last_train_epochs": epoch,
+                                "best_map": best_fitness
+                            }
+                        else :
+                            progress_data['best_save_name'] = prev_save_name
+                            progress_data["last_train_epochs"] = epoch
+                            progress_data['best_map'] = best_fitness
+                        
+                        with open(progress_running_path, "w") as configWriter:
+                            json.dump(progress_data, configWriter)
+
             if epoch == self.__epochs:
+                recent_save_name = os.path.join(self.__output_models_dir, self.__model_type+f"_{self.__dataset_name}_last.pt")
                 torch.save(
                         self.__model.state_dict(),
-                        os.path.join(self.__output_models_dir, self.__model_type+f"_{self.__dataset_name}_last.pt")
+                        recent_save_name
                     )
+
+                if progress_data is None:
+                    progress_data = {
+                        "anchors" : anchors,
+                        "last_checkpoint_save_name": recent_save_name,
+                        "best_save_name": None,
+                        "last_train_epochs": epoch,
+                        "best_map": best_fitness
+                    }
+                else :
+                    progress_data['last_checkpoint_save_name'] = recent_save_name
+                    progress_data["last_train_epochs"] = epoch
+                
+                with open(progress_running_path, "w") as configWriter:
+                    json.dump(progress_data, configWriter)
 
         elapsed_time = time.time() - since
         print(f"Training completed in {elapsed_time//60:.0f}m {elapsed_time % 60:.0f}s")
