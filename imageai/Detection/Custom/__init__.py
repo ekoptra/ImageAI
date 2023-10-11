@@ -132,7 +132,7 @@ class DetectionModelTrainer:
                             collate_fn=self.__custom_train_dataset.collate_fn
                         )
         self.__val_loader = DataLoader(
-                            self.__custom_val_dataset, batch_size=self.__mini_batch_size//2,
+                            self.__custom_val_dataset, batch_size=self.__mini_batch_size_validation,
                             shuffle=True, collate_fn=self.__custom_val_dataset.collate_fn
                         )
 
@@ -182,7 +182,13 @@ class DetectionModelTrainer:
             raise ValueError(
                     "The parameter passed should point to a valid directory"
                 )
-    def setTrainConfig(self, object_names_array: List[str], batch_size: int=4, num_experiments=100, train_from_pretrained_model: str = None):
+    def setTrainConfig(
+        self, object_names_array: List[str], 
+        batch_size: int=4, num_experiments=100, 
+        train_from_pretrained_model: str = None,
+        output_path: str = None,
+        batch_size_validation: int=None
+    ):
         """
         'setTrainConfig()' function allows you to set the properties for the training instances. It accepts the following values:
         - object_names_array , this is an array of the names of the different objects in your dataset, in the index order your dataset is annotated
@@ -200,11 +206,12 @@ class DetectionModelTrainer:
             extension_check(self.__model_path)
         self.__classes = object_names_array
         self.__mini_batch_size = batch_size
+        self.__mini_batch_size_validation = batch_size // 2 if batch_size_validation is None else batch_size_validation
         self.__epochs = num_experiments
-        self.__output_models_dir = os.path.join(self.__data_dir, "models")
-        self.__output_json_dir = os.path.join(self.__data_dir, "json")
+        self.__output_models_dir = os.path.join(self.__data_dir if output_path is None else output_path, "models")
+        self.__output_json_dir = os.path.join(self.__data_dir if output_path is None else output_path, "json")
 
-    def trainModel(self) -> None:
+    def trainModel(self, eval_every_epoch=1) -> None:
         """
         'trainModel()' function starts the actual model training. Once the training starts, the training instance
         creates 3 sub-folders in your dataset folder which are:
@@ -287,6 +294,10 @@ class DetectionModelTrainer:
                     self.__lr_scheduler.step()
 
                 else:
+                    if (epoch != self.__epochs) and ((epoch % eval_every_epoch) != 0):
+                        print(f"    Skip validation on this epoch")    
+                        continue
+
                     self.__model.eval()
                     print("Validation:")
 
