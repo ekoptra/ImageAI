@@ -237,7 +237,7 @@ class DetectionModelTrainer:
         if not continue_training:
             progress_data = None
 
-        anchors = None if progress_data is None else progress_data['anchors']
+        anchors = None if progress_data is None else np.array(progress_data['anchors'])
         last_save_model = None if progress_data is None else progress_data['last_checkpoint_save_name']
 
         mp, mr, map50, map50_95, best_fitness = 0, 0, 0, 0, 0.0 if progress_data is None else progress_data['best_map']
