@@ -232,7 +232,7 @@ class DetectionModelTrainer:
         if os.path.exists(progress_running_path):
             with open(progress_running_path, 'r') as f:
                 progress_data = json.load(f)
-        else progress_data = None
+        else: progress_data = None
 
         if not continue_training:
             progress_data = None
@@ -315,7 +315,7 @@ class DetectionModelTrainer:
 
                     print(f"    box loss-> {float(mloss[0]):.5f}, object loss-> {float(mloss[1]):.5f}, class loss-> {float(mloss[2]):.5f}")
 
-                    if (i % save_every_epoch) == 0:
+                    if (epoch % save_every_epoch) == 0:
                         recent_save_name = self.__model_type+f"_{self.__dataset_name}_checkpoint_epoch-{epoch}.pt"
                         if last_checkpoint_save_name:
                             os.remove(os.path.join(self.__output_models_dir, last_checkpoint_save_name))
