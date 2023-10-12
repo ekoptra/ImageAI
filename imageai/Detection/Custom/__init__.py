@@ -273,7 +273,7 @@ class DetectionModelTrainer:
 
         self.__lr_scheduler.last_epoch = -1
 
-        last_train_epochs = 1 if progress_data is None else progress_data['last_train_epochs']
+        last_train_epochs = 1 if progress_data is None else (progress_data['last_train_epochs'] + 1)
 
         for epoch in range(last_train_epochs, self.__epochs+1):
             self.__optimizer.zero_grad()
