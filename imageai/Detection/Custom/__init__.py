@@ -318,11 +318,11 @@ class DetectionModelTrainer:
                     if (epoch % save_every_epoch) == 0:
                         recent_save_name = self.__model_type+f"_{self.__dataset_name}_checkpoint_epoch-{epoch}.pt"
                         if last_checkpoint_save_name:
-                            os.remove(os.path.join(self.__output_models_dir, recent_save_name))
+                            os.remove(os.path.join(self.__output_models_dir, last_checkpoint_save_name))
 
                         torch.save(
                             self.__model.state_dict(),
-                            os.path.join(self.__output_models_dir, last_checkpoint_save_name)
+                            os.path.join(self.__output_models_dir, recent_save_name)
                         )
                         last_checkpoint_save_name = recent_save_name
 
