@@ -257,6 +257,8 @@ class DetectionModelTrainer:
 
         self.__set_training_param(self.__epochs, accumulate, anchors)
 
+        anchors = self.__anchors
+
         if not progress_data:
             with open(os.path.join(self.__output_json_dir, f"{self.__dataset_name}_{self.__model_type}_detection_config.json"), "w") as configWriter:
                 json.dump(
